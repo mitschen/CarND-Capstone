@@ -19,16 +19,18 @@ class Controller(object):
         pass
 
     def control(self,linear_velocity, angular_velocity, current_velocity, enabled):
-        # TODO: Change the arg, kwarg list to suit your needs
-        # Return throttle, brake, steer
         error = linear_velocity - current_velocity
-        acc = self.lowpass.filt(self.pid.step(error, self.timestep))
-        if acc < 0.:
-          brake = -acc * self.brake_factor 
-          acc = 0.
-        else:
-          brake = 0.
         if enabled:
+          #smooth the acceleration value
+          acc = self.lowpass.filt(self.pid.step(error, self.timestep))
+          #negative acceleration means brake
+          if acc < 0.:
+            brake = -acc * self.brake_factor 
+            acc = 0.
+          else:
+            brake = 0.
+             
           return acc, brake, self.yawCtrl.get_steering(linear_velocity, angular_velocity, current_velocity)
+        
         self.pid.reset()
         return 0., 0., 0.

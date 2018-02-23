@@ -68,7 +68,7 @@ class DBWNode(object):
         #setup the controller        
         min_speed = 0.
         yawCtrl = YawController(wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
-        acceleration_pid = PID(1.24, 0.001, 1., decel_limit, accel_limit)
+        acceleration_pid = PID(1.24, 0.001, 0.384, decel_limit, accel_limit)
         brake_factor = vehicle_mass * wheel_radius 
         # TODO: Create `Controller` object
         self.controller = Controller(yawCtrl, acceleration_pid, 
@@ -112,11 +112,6 @@ class DBWNode(object):
             
             
             throttle, brake, steering = self.controller.control(self.linear_velocity, self.angular_velocity, self.current_velocity, self.enabled)
-            #if self.current_velocity >= 15.:
-            #  throttle = 0.
-            if throttle < 0.:
-              brake = -throttle
-              throttle = 0.
 
             
             if self.enabled:
