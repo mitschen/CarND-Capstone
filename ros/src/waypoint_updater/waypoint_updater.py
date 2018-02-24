@@ -3,9 +3,10 @@
 import rospy
 from geometry_msgs.msg import PoseStamped
 from styx_msgs.msg import Lane, Waypoint
+from std_msgs.msg import Int32
 
 import math
-
+import copy
 '''
 This node will publish waypoints from the car's current position to some `x` distance ahead.
 
@@ -33,18 +34,23 @@ class WaypointUpdater(object):
         self.publish_fwp = rospy.Publisher('/final_waypoints', Lane, queue_size = 10)
 
         # TODO: Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
-#         rospy.Subscriber('/traffic_waypoint', Lane, self.waypoints_cb)
-#         rospy.Subscriber('/obstacle_waypoint', Lane, self.waypoints_cb)
+        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
+        rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
 
 
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # TODO: Add other member variables you need below
         self.allWaypoints = None #all available waypoints
+        self.resultingWaypoints = None
         self.finalWaypoints = None #resulting final waypoints
         self.latestWaypoint = 0 #the last first waypoint
         self.currentPosition = None #the current position
         self.c_maxDistance = None
+        self.reducedVelocity = []
+        self.obstacleWPIdx = 0. #for trafficlights and obstacles
+        
+     
         
         rospy.spin()
 
@@ -80,7 +86,7 @@ class WaypointUpdater(object):
         wpindex += 1
       
       if(self.latestWaypoint != resultingLatestWP):
-        rospy.loginfo("Clostest waypoint has changed from {0} => {1} at location {2}"
+        rospy.logwarn("Clostest waypoint has changed from {0} => {1} at location {2}"
                       .format(self.latestWaypoint, resultingLatestWP, str(self.currentPosition.pose)))
         self.latestWaypoint = resultingLatestWP
         #identify the final 200 waypoints and publish them
@@ -95,6 +101,8 @@ class WaypointUpdater(object):
       #=> the track is a circle
       self.c_maxDistance = self.distancePos(self.allWaypoints.waypoints[0].pose.pose, 
                            self.allWaypoints.waypoints[len(self.allWaypoints.waypoints)/2].pose.pose)
+      self.resultingWaypoints = copy.deepcopy(self.allWaypoints.waypoints)
+      rospy.logwarn("WAYPONIT_CB")
       pass
       
     
@@ -106,7 +114,13 @@ class WaypointUpdater(object):
       rWaypoints.waypoints = wp[pos:min(pos+LOOKAHEAD_WPS, len(wp))]
       size = len(rWaypoints.waypoints)
       if size < LOOKAHEAD_WPS:
+        rospy.logwarn("\n\n\n\nRoundabout")
         rWaypoints.waypoints.append(wp[:LOOKAHEAD_WPS-size])
+
+      speedArray = []
+      for i in range (10):
+        speedArray.append([pos+i, self.get_waypoint_velocity(rWaypoints.waypoints[i])])
+      rospy.logwarn("Next guys "+str(speedArray))
       self.publish_fwp.publish(rWaypoints)
       pass
         
@@ -116,6 +130,62 @@ class WaypointUpdater(object):
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
+        resultingWP = self.allWaypoints.waypoints
+        
+        
+        waypoint = int(msg.data)
+        self.obstacleWPIdx = waypoint
+        deacceleration = 10.
+        securityDistance = 6. #size of the crossing
+        currentSpeed = self.get_waypoint_velocity(self.allWaypoints.waypoints[self.latestWaypoint])
+        if(waypoint != -1):
+          #calculate distance between car and light
+          distCar2TL = self.distance(self.allWaypoints.waypoints, 
+                                     self.latestWaypoint, self.obstacleWPIdx)
+          timeToZeroSpeed = currentSpeed / deacceleration
+          distanceToStop =securityDistance + 0.5 * deacceleration * timeToZeroSpeed**2; 
+          rospy.logwarn("No problem distance is {0} and it will take us {1}".format(distCar2TL, distanceToStop))
+          
+          
+          speed = 0.
+          prevPose = resultingWP[waypoint].pose.pose
+          distance = 0.
+          iterator = 0
+          while distance < securityDistance:
+            iterator +=1
+            self.reducedVelocity.append([waypoint, resultingWP[waypoint].twist.twist.linear.x])
+            resultingWP[waypoint].twist.twist.linear.x = speed
+            prevWaypoint = waypoint
+            waypoint = (waypoint - 1) % len(self.allWaypoints.waypoints)
+            distance += self.distance(self.allWaypoints.waypoints, waypoint, prevWaypoint)
+          waypoint = (waypoint + 1) % len(self.allWaypoints.waypoints)
+          rospy.logwarn("Total of {0} wp in security distance".format(iterator))
+          stopLoop = False
+          iterator = 0
+          while not stopLoop:
+            waypoint = (waypoint - 1) % len(self.allWaypoints.waypoints)
+            distance = self.distancePos(resultingWP[waypoint].pose.pose, prevPose)
+            time = math.sqrt(distance * 2 / deacceleration)
+            rospy.logwarn("Timer " + str(time) + " Dist " +str(self.distancePos(resultingWP[waypoint].pose.pose, prevPose)))
+            prevPose = resultingWP[waypoint].pose.pose
+            speed = speed + distance / time
+            #rospy.logwarn("Altered wp {0}".format(waypoint))
+            if(resultingWP[waypoint].twist.twist.linear.x < speed):
+              stopLoop = True
+            else :
+              self.reducedVelocity.append([waypoint, resultingWP[waypoint].twist.twist.linear.x])
+              resultingWP[waypoint].twist.twist.linear.x = speed
+#               rospy.logwarn(str(resultingWP[waypoint]))
+              rospy.logwarn("Altered wp {0} - speed {1}".format(waypoint, speed))
+            iterator += 1
+          rospy.loginfo("Altered a total of {0} waypoints".format(iterator))
+        elif 0 != len(self.reducedVelocity):
+          for entry in self.reducedVelocity:
+            resultingWP[entry[0]].twist.twist.linear.x = entry[1]
+          self.reducedVelocity = [] 
+#         
+        self.filter_and_send_waypoints()
+           
         pass
 
     def obstacle_cb(self, msg):
@@ -134,7 +204,7 @@ class WaypointUpdater(object):
       result.waypoints = owp[startIndex:min(len(owp), startIndex+LOOKAHEAD_WPS)]
       result.waypoints.append(owp[:(LOOKAHEAD_WPS - len(result.waypoints))])
       return result
-    
+    #expects PoseStamped/Pose as argument
     def distancePos(self, pos1, pos2):
       return math.sqrt((pos1.position.x-pos2.position.x)**2 + (pos1.position.y-pos2.position.y)**2)
 
