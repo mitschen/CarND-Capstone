@@ -1,26 +1,9 @@
 '''
 Created on 24.02.2018
 
-@author: micha
+@author: mitschen@gmail.com
+github: www.github/mitschen/CarND-Capstone/ros/src/tl_detector/light_classification
 '''
-
-
-# import pickle
-# import csv
-# from sklearn.utils import shuffle 
-# import os
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from tensorflow.contrib.layers import flatten
-# import tensorflow as tf
-# 
-# import time
-# import math
-# import datetime
-# 
-# 
-# import scipy.ndimage  
-# import scipy.misc
 
 import random
 import sklearn
@@ -32,14 +15,9 @@ import scipy.misc
 import skimage
 from skimage import color
 
-from collections import Counter
-
-# hello_constant = tf.constant("Hello World")
-# 
-# with tf.Session() as sess:
-#     output = sess.run(hello_constant)
-#     print (output)
- 
+#Used for Training & Classification
+#Reusing the LeNet architecture from the TrafficSignClassifier with
+#some small adaptation. I've added an additional FC 
 def Lenet(features, keep_prob):
     mu = 0.
     sigma = 0.1
@@ -92,6 +70,25 @@ def Lenet(features, keep_prob):
     logits = tf.matmul(fc3, fc4W) + fc4B
     return logits
 
+
+###############################################################################
+# What is an image element 
+# [ numpy.array of the image, label ]
+# the numpy array of the image is a 32x32x3 bit image in rgb
+# the label is a number of 0-red, 1-yellow, 2-green
+#
+# Please note I refer to the image element several times below
+###############################################################################
+
+
+#Used for Training
+#Expects a folderpath. The function will iterate through all subfolders and 
+#searching for image files.
+#As a result it returns a list of lists containing
+#[ RED-Img, YELLOW-Img, GREEN-Img ]
+#Img contains the image element as well as the label (0=red, ..., 2=green)
+#All images getting scaled to 32x32px and the alpha is removed from the image
+#Returns a list of dataarrays of image elements
 def importCustomImages(filepath):
     resultingImages = [[], [], [] ]
     data = [ [], [], [] ]
@@ -119,36 +116,41 @@ def importCustomImages(filepath):
                                         , file[1]) )
     return resultingImages
 
+#Used for Training 
+#Expects a dataarray of image elements - for each image it applies normalization
+#pushing the mean to zero with a std-deviation of 1.
+#PLEASE NOTE: seems like the TL-classifier doesn't really like this normalization
+#             at all. The results in matching rate were very bad. I guess this
+#             is because of the "relu" activation which doesn't like color
+#             values below 128
+#
+#LONG STORY SHORT: DO NOT NORMALIZE
 def normalizeZeroMeanData(dataarray):
-    count = 0
     for data in dataarray:
-#         if count == 0:
-#             print("Lala" ,data[0])
-#         print("Orig" ,data[0])
-#         data[0] -= 128
-#         print("Minus", data[0])
-#         data[0] = data[0].astype(np.float32) / 128.
-#         print("Div", data[0])
-#         exit(0)
         data[0] -= 128.
-#         data[0][0] = data[0][0].astype(np.float32) / 128.
-        data[0] /= 128.#data[0][0].astype(np.float32) / 128.
-#         if count == 0:
-#             print("Lulu",data[0])
-#             count += 1
+        data[0] /= 128.
     return dataarray
 
+#Used for Training
+#Expects list of dataarrays of image elements - makes sure that all labels are
+#given with same numbers. Therefore this function randomly chooses an
+#element e.g. yellow and appends it  
 def dataNormalizeCnts(val):
     val.sort(key = lambda x : len(x), reverse=True)
-    print(len(val[0]))
-    print(len(val[1]))
-    print(len(val[2]))
     fillUpTo = len(val[0])
     for i in range (1, len(val)):
         while len(val[i]) < fillUpTo:
             val[i].append(random.choice(val[i]))
     return val
 
+#Used for Training
+#Expects a dataarray of image elements and applies some augmentation on these images.
+#In details - each image is appended with
+# flipped l-r-
+# rotated +/-15 degree
+# rotated +/-90 degree
+# shifted 2,2 px to lower, right/ upper left
+# This function will result in 14 times more pictures
 def dataAugmentation(dataarray):
     resultingData = []
     #each image is now
@@ -174,7 +176,10 @@ def dataAugmentation(dataarray):
         resultingData.append( (np.fliplr(resultingData[-1][0]), label) )
     return resultingData
 
-
+#For Verification only
+#Uses the LeNet architecture in combination with a given tensor-graph (flepath) 
+#and verifies the matching rate on a dataarray of image elements.
+#The function will write down the Accuracy of matching to the console
 def loadCNNAndVerify(filepath, val):
     batchsize = 128
     x = tf.placeholder(tf.float32, (None, 32, 32, 3))
@@ -203,7 +208,12 @@ def loadCNNAndVerify(filepath, val):
     print("Total accuracy of {0} samples is {1:.3f}".format(num_examples, total_accuracy / num_examples))
         
         
-
+#For Training only
+#This is the main-function which trains the CNN (LeNet)
+#As input it expects a dataaray of image elements. From this array
+#it will chose a subset of training/ validation and test-data
+#If the training results in an accuracy of about 90%, the function writes
+#the tensor-graph (& weights) to the ./tensor folder.
 def trainCNN(data):
     rate = 0.0005
     epochs = 30
@@ -218,7 +228,6 @@ def trainCNN(data):
     logits = Lenet(input_layer, keep_prob)
     
     cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels))
-#     optimizer = tf.train.GradientDescentOptimizer(learning_rate=rate).minimize(cost)
     optimizer = tf.train.AdamOptimizer(learning_rate=rate).minimize(cost)
     
     # Accuracy
@@ -227,32 +236,17 @@ def trainCNN(data):
     
     # Initializing the variables
     init = tf. global_variables_initializer()
-    
-    
     in_samples, in_labels = sklearn.utils.shuffle(np.array(data)[...,0],np.array(data)[...,1])
     
     noTraining = int(len(in_samples) * 0.52)
     noValidation = int(len(in_samples) * 0.12)
     noTest = int(len(in_samples) * 0.36)
-    
-    
-    
+
+    #Split the samples into training/verification and test
+    #Please note: i've trained always from the scratch - so it didn't
+    #             really hurt to chose the test-data always again
     training_x = in_samples[:noTraining].tolist()
-    
-    
     training_y = in_labels[:noTraining].tolist()
-    red= 0
-    yel= 0
-    gre= 0
-    for ele in training_y:
-      if ele == 0:
-        red += 1
-      elif ele == 1:
-        yel += 1
-      else:
-        gre +=1  
-    
-    print("Distribution {0} {1} {2}".format(red, yel, gre))
     validation_x = in_samples[noTraining:noTraining+noValidation].tolist()
     validation_y = in_labels[noTraining:noTraining+noValidation].tolist()
     test_x = in_samples[noTraining+noValidation:].tolist()
@@ -268,6 +262,7 @@ def trainCNN(data):
         for epoch in range(epochs):
             stopLoop = False
             batchIdx = 0
+            #each epoch, shuffle the training data again
             training_x, training_y = sklearn.utils.shuffle(training_x, training_y)
             while(not stopLoop):
                 start = batchIdx * batchsize
@@ -280,23 +275,8 @@ def trainCNN(data):
                     inputY: batch_y,
                     keep_prob: keep_probability})
      
-                # Calculate batch loss and accuracy
-#                 loss = sess.run(cost, feed_dict={
-#                     input_layer: batch_x,
-#                     labels: batch_y,
-#                     keep_prob: 1.})
-#                 valid_acc = sess.run(accuracy, feed_dict={
-#                     input_layer: validation_x[:],
-#                     labels: validation_y[:],
-#                     keep_prob : 1.})
-#      
-#                 print('Epoch {:>2}, Batch {:>3} -'
-#                       'Loss: {:>10.4f} Validation Accuracy: {:.6f}'.format(
-#                     epoch + 1,
-#                     batchIdx + 1,
-#                     loss,
-#                     valid_acc))
                 batchIdx += 1
+            #do validation check after each epoch    
             valid_acc = sess.run(accuracy, feed_dict={
                 input_layer: validation_x[:],
                 inputY: validation_y[:],
@@ -309,31 +289,17 @@ def trainCNN(data):
             inputY: test_y[:],
             keep_prob: 1.})
         print('Testing Accuracy: {}'.format(test_acc))
-        tf.train.Saver().save(sess, 'E:/tensorflow/tensor{:.3f}'.format(test_acc))
+        if(test_acc > 0.9):
+            tf.train.Saver().save(sess, '../tensor/tensor{:.3f}'.format(test_acc))
     
     
 class TLClassifier(object):
     def __init__(self, filepath):
-#         self.session = tf.InteractiveSession()
         self.path = filepath
-        
         self.session = None 
         self.x = tf.placeholder(tf.float32, (None, 32, 32, 3))
         self.rate = tf.constant(1.)
         self.classifier = tf.argmax(Lenet(self.x, self.rate), 1)
-        
-        
-#         tf.train.Saver().restore(self.session, filepath)
-#         self.graph = tf.Graph()
-#         with self.graph.as_default():
-#             self.session = tf.Session(graph = self.graph)
-#             with self.session as sess:
-#                 tf.train.Saver().restore(sess, filepath)
-# #             with tf.Session() as sess:
-# #                 tf.train.Saver().restore(sess, filepath)
-#                 self.defaultSession = sess
-#         self.x = tf.placeholder(tf.float32, (None, 32, 32, 3))
-#         self.classifier = tf.argmax(Lenet(self.x, tf.constant(1.)))
                 
     def classifyImageFromPath(self, path):
         return self.classifyImage(scipy.misc.imread(path))
@@ -342,86 +308,70 @@ class TLClassifier(object):
         ##resize
         image = np.array(scipy.misc.imresize(img, (32,32))[:,:,:3], dtype=np.float32)
         ##normalize
+        #As mentioned above (see normalizeZeroMeanData) don't do that
+        #for traffic lights
 #         image -= 128.
 #         image = image.astype(np.float32) / 128.
+
+        #our tensor expects an array
         image = [image]
-        
-#         x = tf.placeholder(tf.float32, (None, 32, 32, 3))
-#         rate = tf.constant(1.)
-#         classifier = tf.argmax(Lenet(x, rate), 1)
 
-
-#Interactive
+        #start interactive session if not yet existing
         if self.session is None:
             self.session = tf.InteractiveSession()
             tf.train.Saver().restore(self.session, self.path)
         return self.session.run(self.classifier, feed_dict={self.x:image})[0]
      
-    
-    
-#         with tf.Session() as sess:
-#             tf.train.Saver().restore(sess, self.path)
-#             result = sess.run(classifier, feed_dict={x:image})
-#             return result[0]
-            
-    
+# used for Training, Verification and testing    
 if __name__ == '__main__':
-#     tf.app.run()
-    train = False
-    verify = True
+    train = False   #train the CNN
+    verify = True   #verify the CNN on a given set
+    test = True     #test the TLClassifier for a given graph
+    #this folder contains a bunch of testdata i've found and downloaded
+    #here https://github.com/udacity/iSDC-P5-traffic-light-classifier-starter-code
+    #Furthermore i've used a bunch of TrafficLight images from the simulator
+    #to train the classifier
+    img_sourcefolder = "C:/Users/micha/Desktop/Udacity/Last/training"
+    #path to an already trained tensor graph
+    tensor_sourcepath='../tensor/tensor0.999'
     if train:
-        val = importCustomImages("C:/Users/micha/Desktop/Udacity/Last/training")
-#     scipy.misc.imsave('E:/rot{0}.png'.format(val[0][0][1]), val[0][0][0])
-#     scipy.misc.imsave('E:/gelb{0}.png'.format(val[1][0][1]), val[1][0][0] )
-#     scipy.misc.imsave('E:/gruen{0}.png'.format(val[2][0][1]), val[2][0][0])
-#     print("Image count red {0}, yellow {1} and green {2}".format(len(val[0]), len(val[1]), len(val[2])))
+        
+        #read tl-images and apply labels
+        val = importCustomImages(img_sourcefolder)
+        #adjust the number of element counts so that each
+        #traffic light occurs the same time
         val = dataNormalizeCnts(val)
-#     print("Image count red {0}, yellow {1} and green {2}".format(len(val[0]), len(val[1]), len(val[2])))
-#         print("lala", val[0][0][0])
+        #concatenate all images from a list of lists to a list of images
         val = np.concatenate(val)
-#         print("lulu", val[0][0])
-#         val = normalizeZeroMeanData(val)
+        #Don't do normalization!!!!
+        #val = normalizeZeroMeanData(val)
+        #Apply augmentation to the dataset
         val = dataAugmentation(val)
-#         print("lulu", val[0][0])
-#         exit(0)
+        #start training
         trainCNN(val)
         exit(0)
-# # 
-#     exit(0)
-    filepath='E:/tensorflow/tensor0.999'
-    if verify:
-        val = importCustomImages("C:/Users/micha/Desktop/Udacity/Last/training/sim_basti2")
-        val = np.concatenate(val)
-        loadCNNAndVerify(filepath, val)
-        exit(0)
-#     scipy.misc.imsave('R:/test.png', val[0][0][0])
-#     scipy.misc.imsave('R:/test2.png', scipy.ndimage.interpolation.shift(val[0][0][0],  (2., 2., 0.), mode='nearest'))
-#     scipy.misc.imsave('R:/test3.png', np.fliplr(val[0][0][0]))
-# #     scipy.misc.imsave('R:/test4.png', color.rgb2hsv(val[0][0][0]))
-#     scipy.misc.imsave('R:/test5.png', val[0][0][0])
-    test = TLClassifier(filepath)
-    color = [ 'RED', 'YELLOW', 'GREEN']
-#     c = test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/img_20180207-0401380.png')
-#     print( color[c])
-    
 
-# C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/green
-# C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/red
-# C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/yellow
-# C:/Users/micha/Desktop/Udacity/Last/training/green
-# C:/Users/micha/Desktop/Udacity/Last/training/red
-# C:/Users/micha/Desktop/Udacity/Last/training/yellow
-    cnt = 0    
-    for subdir, dir, files in os.walk('C:/Users/micha/Desktop/Udacity/Last/training/yellow'):
-        for file in files :
-            if file.endswith((".png", ".jpg", ".jpeg")):
-                print(color[test.classifyImageFromPath(os.path.join(subdir, file))])
-                cnt += 1
-    print( "Total "+str(cnt))
-#     print(test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/ecd9d40f-23fb-49db-acd8-ec50384fad59.jpg'))
-#     print(test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/c214279e-7a8c-462b-a0a9-2f6c14eeb1bd.jpg'))
-#     print(test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/f32f4884-7024-44c9-92d5-538e27406ac9.jpg'))
-#     print(color[test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/ecd9d40f-23fb-49db-acd8-ec50384fad59.jpg')])
-#     print(color[test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/c214279e-7a8c-462b-a0a9-2f6c14eeb1bd.jpg')])
-#     print(color[test.classifyImageFromPath('C:/Users/micha/Desktop/Udacity/Last/training/samples/training/yellow/f32f4884-7024-44c9-92d5-538e27406ac9.jpg')])
+    if verify:
+        val = importCustomImages(img_sourcefolder)
+        val = np.concatenate(val)
+        loadCNNAndVerify(tensor_sourcepath, val)
+        exit(0)
+        
+    if test:
+        color = [ 'RED', 'YELLOW', 'GREEN']
+        test = TLClassifier(tensor_sourcepath)
+    
+        sim_green_path   = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/green'
+        sim_red_path     = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/red'
+        sim_yellow_path  = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/yellow'
+        real_green_path  = 'C:/Users/micha/Desktop/Udacity/Last/training/green'
+        real_red_path    = 'C:/Users/micha/Desktop/Udacity/Last/training/red'
+        real_yellow_path = 'C:/Users/micha/Desktop/Udacity/Last/training/yellow'
+        cnt = 0    
+        for subdir, dir, files in os.walk(real_yellow_path):
+            for file in files :
+                if file.endswith((".png", ".jpg", ".jpeg")):
+                    print(color[test.classifyImageFromPath(os.path.join(subdir, file))])
+                    cnt += 1
+        print( "Total "+str(cnt))
     
