@@ -6,14 +6,18 @@ github: www.github/mitschen/CarND-Capstone/ros/src/tl_detector/light_classificat
 '''
 
 import random
+############################################################################
+#NOTE: not available in the Udacity environment of CarND-Capstone
+############################################################################
 import sklearn
 import numpy as np
 import tensorflow as tf
 import os
 import scipy.ndimage  
 import scipy.misc
-import skimage
-from skimage import color
+
+
+default_graph_path = './tensor/linux_tensor0.999'
 
 #Used for Training & Classification
 #Reusing the LeNet architecture from the TrafficSignClassifier with
@@ -236,7 +240,12 @@ def trainCNN(data):
     
     # Initializing the variables
     init = tf. global_variables_initializer()
+    ############################################################################
+    #NOTE: not available in the Udacity environment of CarND-Capstone
+    ############################################################################
     in_samples, in_labels = sklearn.utils.shuffle(np.array(data)[...,0],np.array(data)[...,1])
+    #Instead do not shuffle
+    #in_samples, in_labels = np.array(data)[...,0],np.array(data)[...,1]
     
     noTraining = int(len(in_samples) * 0.52)
     noValidation = int(len(in_samples) * 0.12)
@@ -263,6 +272,9 @@ def trainCNN(data):
             stopLoop = False
             batchIdx = 0
             #each epoch, shuffle the training data again
+            ############################################################################
+            #NOTE: not available in the Udacity environment of CarND-Capstone
+            ############################################################################
             training_x, training_y = sklearn.utils.shuffle(training_x, training_y)
             while(not stopLoop):
                 start = batchIdx * batchsize
@@ -290,16 +302,20 @@ def trainCNN(data):
             keep_prob: 1.})
         print('Testing Accuracy: {}'.format(test_acc))
         if(test_acc > 0.9):
-            tf.train.Saver().save(sess, '../tensor/tensor{:.3f}'.format(test_acc))
+            tf.train.Saver().save(sess, './tensor/linux_tensor{:.3f}'.format(test_acc))
     
     
-class TLClassifier(object):
-    def __init__(self, filepath):
-        self.path = filepath
+class TrafficLightClassifier(object):
+    def __init__(self, filepath = default_graph_path):
+        self.path = os.path.abspath(filepath)
+#         print(filepath)
+#         print(tf.__version__)
         self.session = None 
         self.x = tf.placeholder(tf.float32, (None, 32, 32, 3))
         self.rate = tf.constant(1.)
         self.classifier = tf.argmax(Lenet(self.x, self.rate), 1)
+        self.session = tf.InteractiveSession()
+        tf.train.Saver().restore(self.session, self.path)
                 
     def classifyImageFromPath(self, path):
         return self.classifyImage(scipy.misc.imread(path))
@@ -326,14 +342,15 @@ class TLClassifier(object):
 if __name__ == '__main__':
     train = False   #train the CNN
     verify = True   #verify the CNN on a given set
-    test = True     #test the TLClassifier for a given graph
+    test = True     #test the TrafficLightClassifier for a given graph
     #this folder contains a bunch of testdata i've found and downloaded
     #here https://github.com/udacity/iSDC-P5-traffic-light-classifier-starter-code
     #Furthermore i've used a bunch of TrafficLight images from the simulator
     #to train the classifier
-    img_sourcefolder = "C:/Users/micha/Desktop/Udacity/Last/training"
+    #img_sourcefolder = "C:/Users/micha/Desktop/Udacity/Last/training"
+    img_sourcefolder = "/home/student/Pictures/training"
     #path to an already trained tensor graph
-    tensor_sourcepath='../tensor/tensor0.999'
+    tensor_sourcepath=default_graph_path#'../tensor/linux_tensor0.999'
     if train:
         
         #read tl-images and apply labels
@@ -359,7 +376,7 @@ if __name__ == '__main__':
         
     if test:
         color = [ 'RED', 'YELLOW', 'GREEN']
-        test = TLClassifier(tensor_sourcepath)
+        test = TrafficLightClassifier(tensor_sourcepath)
     
         sim_green_path   = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/green'
         sim_red_path     = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/red'
