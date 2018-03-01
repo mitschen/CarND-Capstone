@@ -5,7 +5,7 @@ from tlclassifier import TrafficLightClassifier
 class TLClassifier(object):
     def __init__(self):
         #TODO load classifier
-        self.classifier = None 
+        self.classifier = self.classifier = TrafficLightClassifier('./light_classification/tensor/linux_tensor0.999')
         pass
 
     def get_classification(self, image):

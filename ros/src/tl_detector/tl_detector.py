@@ -14,6 +14,7 @@ import yaml
 import math
 import sys
 
+
 STATE_COUNT_THRESHOLD = 3
 class TLDetector(object):
     def __init__(self):
@@ -64,7 +65,7 @@ class TLDetector(object):
         self.state_count = 0
         
         
-        self.once = 0
+        self.counter = 0
         
         
 
@@ -136,8 +137,6 @@ class TLDetector(object):
         self.camera_image = msg
         
         light_wp, state = self.process_traffic_lights()
-#           self.once = (self.once +1 ) %10
-#           self.once = False
 
         '''
         Publish upcoming red lights at camera frequency.
@@ -195,7 +194,8 @@ class TLDetector(object):
             return False
 
 #         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
-        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "rgb8")
+        #RGB8 in CV2 is not RGB in scipy!!!
+        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
 
         #Get classification
         return self.light_classifier.get_classification(cv_image)
@@ -205,27 +205,14 @@ class TLDetector(object):
     #Please note: function returns the tl index the car is
     #currently on or it is infront of the car
     #PLEASTE NOTE: self.stopLineIndex is already sorted by waypoint-index
+    #TODO: optimize using binary search
     def find_next_stoplineIndex(self, index):
       for i in range (len(self.stopLineIndex)):
-        next = i+1 % len(self.stopLineIndex)
+        next = (i+1) % len(self.stopLineIndex)
         if self.stopLineIndex[i][0] < index:
           if(self.stopLineIndex[next][0] >= index):
              return next
       return 0
-#       first = 0
-#       last = len(self.stopLineIndex) - 1
-#       while first < last:
-#         i = (first + last) / 2
-#         stopIdxWP = self.stopLineIndex[i][0] 
-#         if( stopIdxWP == index):
-#           return i
-#         elif( stopIdxWP > index ):
-#           last = i - 1
-#         else: #(stopIdxWP < index)
-#           first = i + 1
-#       i = (first + last ) / 2
-#       rospy.loginfo("StopIdx {0}".format(i))
-#       return i 
 
     def get_waypoint_distance(self, idx0, idx1):
       wp0 = self.waypoints.waypoints[idx0]
@@ -241,8 +228,6 @@ class TLDetector(object):
       if not self.has_image:
         return self.lights[tl_index].state
       else:
-        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "rgb8")
-
         # calculate vector from vehicle to traffic light in vehicle coordinate system
         dx_world = self.lights[tl_index].pose.pose.position.x - self.pose.pose.position.x
         dy_world = self.lights[tl_index].pose.pose.position.y - self.pose.pose.position.y
@@ -261,7 +246,6 @@ class TLDetector(object):
         if np.linalg.matrix_rank(rotation_matrix) == 3:
             inv_rotation_matrix = np.linalg.inv(rotation_matrix)
             dxyz_vehicle = np.matmul(inv_rotation_matrix, [[dx_world], [dy_world], [dz_world]])
-            # check if traffic light is visible from vehicle
             dy_veh_scaled = dxyz_vehicle[1] / dxyz_vehicle[0]
             dz_veh_scaled = dxyz_vehicle[2] / dxyz_vehicle[0]
             cropped_edge_len = int(round(8000.0 / dxyz_vehicle[0]))
@@ -277,11 +261,18 @@ class TLDetector(object):
                 light_idx = tl_index
                 light_pos = self.lights[tl_index].pose.pose.position
                 # convert image to cv2 format
+                #CV2-RGB8 is the same as the color-scheme understanding of scipy
+                #DO NOT APPLY FURTHER CONVERTION
                 cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "rgb8")
-                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_RGB2BGR)
                 cv_image = cv_image[cropped_y_from:cropped_y_to, cropped_x_from:cropped_x_to]
-#                 cv_image  = cv2.resize(cv_image, (32, 32))
-                return self.light_classifier.get_classification(cv_image)
+                result = self.light_classifier.get_classification(cv_image) 
+                if (result != self.lights[tl_index].state):
+                  rospy.logwarn("Misdetection expected {0} got {1}".format(self.lights[tl_index].state, result))
+                  colorVal = ['red', 'yellow', 'green']
+                  filename = "./misclassified/mismatch_{0}{1}.jpg".format(colorVal[self.lights[tl_index].state], self.counter)
+                  self.counter+=1
+                  cv2.imwrite(filename, cv_image)
+                return result
 
         self.has_image = False
         

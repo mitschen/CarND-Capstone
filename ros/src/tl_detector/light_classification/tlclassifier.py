@@ -94,7 +94,7 @@ def Lenet(features, keep_prob):
 #All images getting scaled to 32x32px and the alpha is removed from the image
 #Returns a list of dataarrays of image elements
 def importCustomImages(filepath):
-    resultingImages = [[], [], [] ]
+    resultingImages = [ ]
     data = [ [], [], [] ]
     redCnt = 0
     yelCnt = 0
@@ -114,10 +114,15 @@ def importCustomImages(filepath):
                     greCnt +=1
     
     for i in range(3):
-        for file in data[i]:
+        if 0!=len(data[i]):
+          newImages = []
+          for file in data[i]:
             #resize to 32/32 px and remove alphachannel if availble as well
-            resultingImages[i].append( (np.array(scipy.misc.imresize(scipy.misc.imread(file[0]), (32,32))[:,:,:3], dtype=np.float32)
+            newImages.append( (np.array(scipy.misc.imresize(scipy.misc.imread(file[0]), (32,32))[:,:,:3], dtype=np.float32)
                                         , file[1]) )
+          resultingImages.append(newImages)
+          colorVal = [ "red", "yellow", "green"]
+          print("Total of {0} samples for {1}".format(len(newImages), colorVal[newImages[0][1]] ))
     return resultingImages
 
 #Used for Training 
@@ -349,6 +354,8 @@ if __name__ == '__main__':
     #to train the classifier
     #img_sourcefolder = "C:/Users/micha/Desktop/Udacity/Last/training"
     img_sourcefolder = "/home/student/Pictures/training"
+    img_sourcefolder = "/home/student/Udacity/CarND-Capstone/ros/src/tl_detector/misclassified"
+    #img_sourcefolder = "/home/student/Pictures/training/misclassified"
     #path to an already trained tensor graph
     tensor_sourcepath=default_graph_path#'../tensor/linux_tensor0.999'
     if train:
