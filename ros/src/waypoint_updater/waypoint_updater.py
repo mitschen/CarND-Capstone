@@ -36,18 +36,18 @@ class WaypointUpdater(object):
         # TODO: Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
         rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
         rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
-
+        self.c_maxVelocity = rospy.get_param('/waypoint_loader/velocity',40.) / 3.6
 
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
+        
 
         # TODO: Add other member variables you need below
         self.allWaypoints = None #all available waypoints
-        self.resultingWaypoints = None
         self.finalWaypoints = None #resulting final waypoints
         self.latestWaypoint = 0 #the last first waypoint
         self.currentPosition = None #the current position
         self.c_maxDistance = None
-        self.reducedVelocity = []
+        self.reducedVelocity = [] #remember any reduced velocities
         self.obstacleWPIdx = 0. #for trafficlights and obstacles
         
      
@@ -86,23 +86,25 @@ class WaypointUpdater(object):
         wpindex += 1
       
       if(self.latestWaypoint != resultingLatestWP):
-#         rospy.logwarn("Clostest waypoint has changed from {0} => {1} at location {2}"
-#                       .format(self.latestWaypoint, resultingLatestWP, str(self.currentPosition.pose)))
         self.latestWaypoint = resultingLatestWP
         #identify the final 200 waypoints and publish them
         self.filter_and_send_waypoints()
-      
       
       pass
 
     def waypoints_cb(self, waypoints):
       self.allWaypoints = waypoints
+      #make sure, that all waypoints-velocity is below max-velocity
+      counter = 0
+      for wp in self.allWaypoints.waypoints:
+        wp.twist.twist.linear.x = min(self.get_waypoint_velocity(wp), self.c_maxVelocity)
+        if(self.get_waypoint_velocity(wp) <=0.):
+          counter +=1
+      rospy.logwarn("Total number of WP with zero speed " + str(counter))
       #get the possible max distance (from start to middle of track)
       #=> the track is a circle
       self.c_maxDistance = self.distancePos(self.allWaypoints.waypoints[0].pose.pose, 
                            self.allWaypoints.waypoints[len(self.allWaypoints.waypoints)/2].pose.pose)
-      self.resultingWaypoints = copy.deepcopy(self.allWaypoints.waypoints)
-      rospy.logwarn("WAYPONIT_CB")
       pass
       
     
@@ -127,12 +129,11 @@ class WaypointUpdater(object):
         # TODO: Callback for /traffic_waypoint message. Implement
         resultingWP = self.allWaypoints.waypoints
         
-        
         waypoint = int(msg.data)
         self.obstacleWPIdx = waypoint
-        deacceleration = 5.
-        stopDistance = 2. 
-        securityDistance = 10. 
+        deacceleration = 2.
+        stopDistance = 1. 
+        securityDistance = 3. 
         currentSpeed = self.get_waypoint_velocity(self.allWaypoints.waypoints[self.latestWaypoint])
         if (waypoint != -1) :
           #avoid that we overwrite the already adjusted speed-values
@@ -140,53 +141,39 @@ class WaypointUpdater(object):
             #calculate distance between car and light
             distCar2TL = self.distance(self.allWaypoints.waypoints, 
                                        self.latestWaypoint, self.obstacleWPIdx)
-            timeToZeroSpeed = currentSpeed / deacceleration
-            distanceToStop =securityDistance + 0.5 * deacceleration * timeToZeroSpeed**2; 
+            timeToZeroSpeed = (currentSpeed-1.) / deacceleration
+            distanceToStop = securityDistance + 0.5 * deacceleration * timeToZeroSpeed**2; 
             rospy.logwarn("No problem distance is {0} and it will take us {1}".format(distCar2TL, distanceToStop))
             
-            
+            prevWaypoint = None
             speed = 0.
-            prevPose = resultingWP[waypoint].pose.pose
             distance = 0.
             iterator = 0
-            while distance < securityDistance:
+            while distance < distanceToStop:
               iterator +=1
               self.reducedVelocity.append([waypoint, resultingWP[waypoint].twist.twist.linear.x])
               if(distance < stopDistance):
                 resultingWP[waypoint].twist.twist.linear.x = speed
-              else:
+              elif (distance < securityDistance):
                 resultingWP[waypoint].twist.twist.linear.x = 1.0
+              else:
+                resultingWP[waypoint].twist.twist.linear.x =\
+                   resultingWP[prevWaypoint].twist.twist.linear.x \
+                   + math.sqrt(2*self.distance(resultingWP, prevWaypoint, waypoint)*deacceleration)
+                
               prevWaypoint = waypoint
               waypoint = (waypoint - 1) % len(self.allWaypoints.waypoints)
               distance += self.distance(self.allWaypoints.waypoints, waypoint, prevWaypoint)
             waypoint = (waypoint + 1) % len(self.allWaypoints.waypoints)
             rospy.logwarn("Total of {0} wp in security distance".format(iterator))
-            stopLoop = False
             iterator = 0
-#           while not stopLoop:
-#             waypoint = (waypoint - 1) % len(self.allWaypoints.waypoints)
-#             distance = self.distancePos(resultingWP[waypoint].pose.pose, prevPose)
-#             time = math.sqrt(distance * 2 / deacceleration)
-#             rospy.logwarn("Timer " + str(time) + " Dist " +str(self.distancePos(resultingWP[waypoint].pose.pose, prevPose)))
-#             prevPose = resultingWP[waypoint].pose.pose
-#             speed = speed + distance / time
-#             #rospy.logwarn("Altered wp {0}".format(waypoint))
-#             if(resultingWP[waypoint].twist.twist.linear.x < speed):
-#               stopLoop = True
-#             else :
-#               self.reducedVelocity.append([waypoint, resultingWP[waypoint].twist.twist.linear.x])
-#               resultingWP[waypoint].twist.twist.linear.x = speed
-# #               rospy.logwarn(str(resultingWP[waypoint]))
-# #               rospy.logwarn("Altered wp {0} - speed {1}".format(waypoint, speed))
-#             iterator += 1
-# #           rospy.loginfo("Altered a total of {0} waypoints".format(iterator))
         elif 0 != len(self.reducedVelocity):
           rospy.logwarn("Restore waypoint speed for {0} starting with WP {1}"
                         .format(len(self.reducedVelocity), self.reducedVelocity[0][0]))
           for entry in self.reducedVelocity:
             resultingWP[entry[0]].twist.twist.linear.x = entry[1]
           self.reducedVelocity = [] 
-#         
+          
         self.filter_and_send_waypoints()
            
         pass

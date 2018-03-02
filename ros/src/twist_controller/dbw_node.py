@@ -80,7 +80,7 @@ class DBWNode(object):
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb )
 
         self.loop()
-        #
+        
     def dbw_enabled_cb(self, bool):
       self.enabled = bool
       rospy.logwarn("DBW_Enabled is {0}".format(self.enabled))

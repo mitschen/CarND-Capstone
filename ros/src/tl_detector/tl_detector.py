@@ -28,9 +28,10 @@ class TLDetector(object):
         
         self.stopLineIndex = []
         
-        #Temporary variable
+        #Temporary variable used for writing misclassification
         ###########################
         self.globale_counter = 0
+        self.debugmode = True
         ###########################
 
         sub1 = rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
@@ -50,8 +51,8 @@ class TLDetector(object):
 
         config_string = rospy.get_param("/traffic_light_config")
         self.config = yaml.load(config_string)
-        
-        rospy.logwarn("StopLines {0}".format(len(self.config)) + str(self.config))
+        if self.config is not None:
+          rospy.loginfo("StopLines {0}".format(len(self.config)) + str(self.config))
 
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
@@ -66,8 +67,6 @@ class TLDetector(object):
         
         
         self.counter = 0
-        
-        
 
         rospy.spin()
 
@@ -102,6 +101,8 @@ class TLDetector(object):
     #Each element contains the waypoint-index and the trafficlight index
     def calculate_stopline_index(self):
       rospy.loginfo("calculate_stop_line_index called")
+      if self.config is None:
+        return
       stopLineArray = self.config['stop_line_positions']
       for i in range(len(stopLineArray)):
         stopLinePose = PoseStamped()
@@ -176,29 +177,8 @@ class TLDetector(object):
           if(wpclosestDist > wpdist):
             wpclosestDist = wpdist
             wpindex = index
-        #TODO implement
         return wpindex
 
-    def get_light_state(self, light):
-        """Determines the current color of the traffic light
-
-        Args:
-            light (TrafficLight): light to classify
-
-        Returns:
-            int: ID of traffic light color (specified in styx_msgs/TrafficLight)
-
-        """
-        if(not self.has_image):
-            self.prev_light_loc = None
-            return False
-
-#         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
-        #RGB8 in CV2 is not RGB in scipy!!!
-        cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
-
-        #Get classification
-        return self.light_classifier.get_classification(cv_image)
 
     #get an index in the self.stopLineIndex array which 
     #identified the next stoplight infront of the vehicle
@@ -267,11 +247,13 @@ class TLDetector(object):
                 cv_image = cv_image[cropped_y_from:cropped_y_to, cropped_x_from:cropped_x_to]
                 result = self.light_classifier.get_classification(cv_image) 
                 if (result != self.lights[tl_index].state):
-                  rospy.logwarn("Misdetection expected {0} got {1}".format(self.lights[tl_index].state, result))
+                  rospy.logwarn("Misdetection expected {0} got {1} - total of {2} misclassifications"
+                                .format(self.lights[tl_index].state, result, self.counter+1))
                   colorVal = ['red', 'yellow', 'green']
                   filename = "./misclassified/mismatch_{0}{1}.jpg".format(colorVal[self.lights[tl_index].state], self.counter)
                   self.counter+=1
-                  cv2.imwrite(filename, cv_image)
+                  if self.debugmode:
+                    cv2.imwrite(filename, cv_image)
                 return result
 
         self.has_image = False
@@ -289,10 +271,9 @@ class TLDetector(object):
         """
         light = None
 
+        #some plausability checks before starting the processing
         if None is self.waypoints:
           return -1, TrafficLight.UNKNOWN
-#         if None is self.camera_image:
-#           return -1, TrafficLight.UNKNOWN 
         if None is self.pose:
           return -1, TrafficLight.UNKNOWN
         if len( self.stopLineIndex) == 0:
@@ -300,12 +281,11 @@ class TLDetector(object):
         
         car_wp_idx = self.get_closest_waypoint(self.pose)
         closestStopLineIdx = self.find_next_stoplineIndex(car_wp_idx)
-        totalNoTL = len(self.stopLineIndex)
         totalNoWP = len(self.waypoints.waypoints)
         
         
         
-        #we assume that we can see traffic lights up to a distance of 30 m
+        #we assume that we can see traffic lights up to a distance of 40 m
         distance = 0.
         #resulting list of stoplights in sight
         tl_index_in_distance = []
@@ -324,8 +304,6 @@ class TLDetector(object):
             tl_index_in_distance.append(closestStopLineIdx)
             closestStopLineIdx = (closestStopLineIdx + 1) % len(self.stopLineIndex)
           noWPScanned += 1
-#         if(len(tl_index_in_distance ) != 0):
-#           rospy.loginfo("In distance of {0:.3f} a total of {1} stoplights identified".format(distance, len(tl_index_in_distance)))
         for idx in tl_index_in_distance:
           trafficLightIndex = self.stopLineIndex[idx][1]
           trafficLightWaypoint = self.stopLineIndex[idx][0]
@@ -333,25 +311,6 @@ class TLDetector(object):
             return trafficLightWaypoint, TrafficLight.RED
         return -1, TrafficLight.UNKNOWN
               
-          
-      
-#         for idx in range (totalNoTL):
-#           closestStopLineIdx = closestStopLineIdx % totalNoTL
-#           if TrafficLight.RED == self.lights[self.stopLineIndex[closestStopLineIdx][1]].state:
-#             closestRedLightWPIdx = self.stopLineIndex[closestStopLineIdx][0]
-#             return closestRedLightWPIdx, TrafficLight.RED
-#         # List of positions that correspond to the line to stop in front of for a given intersection
-#         stop_line_positions = self.config['stop_line_positions']
-#         if(self.pose):
-#             car_position = self.get_closest_waypoint(self.pose.pose)
-
-        #TODO find the closest visible traffic light (if one exists)
-
-#         if light:
-#             state = self.get_light_state(light)
-#             return light_wp, state
-#         #self.waypoints = None
-        return -1, TrafficLight.UNKNOWN
 
 if __name__ == '__main__':
     try:

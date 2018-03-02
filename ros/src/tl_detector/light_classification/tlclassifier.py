@@ -9,7 +9,7 @@ import random
 ############################################################################
 #NOTE: not available in the Udacity environment of CarND-Capstone
 ############################################################################
-import sklearn
+#import sklearn
 import numpy as np
 import tensorflow as tf
 import os
@@ -248,9 +248,9 @@ def trainCNN(data):
     ############################################################################
     #NOTE: not available in the Udacity environment of CarND-Capstone
     ############################################################################
-    in_samples, in_labels = sklearn.utils.shuffle(np.array(data)[...,0],np.array(data)[...,1])
+    #in_samples, in_labels = sklearn.utils.shuffle(np.array(data)[...,0],np.array(data)[...,1])
     #Instead do not shuffle
-    #in_samples, in_labels = np.array(data)[...,0],np.array(data)[...,1]
+    in_samples, in_labels = np.array(data)[...,0],np.array(data)[...,1]
     
     noTraining = int(len(in_samples) * 0.52)
     noValidation = int(len(in_samples) * 0.12)
@@ -280,7 +280,7 @@ def trainCNN(data):
             ############################################################################
             #NOTE: not available in the Udacity environment of CarND-Capstone
             ############################################################################
-            training_x, training_y = sklearn.utils.shuffle(training_x, training_y)
+#             training_x, training_y = sklearn.utils.shuffle(training_x, training_y)
             while(not stopLoop):
                 start = batchIdx * batchsize
                 end = min((batchIdx+1) * batchsize, len(training_x))
@@ -354,12 +354,10 @@ if __name__ == '__main__':
     #to train the classifier
     #img_sourcefolder = "C:/Users/micha/Desktop/Udacity/Last/training"
     img_sourcefolder = "/home/student/Pictures/training"
-    img_sourcefolder = "/home/student/Udacity/CarND-Capstone/ros/src/tl_detector/misclassified"
-    #img_sourcefolder = "/home/student/Pictures/training/misclassified"
+    #img_sourcefolder = "/home/student/Udacity/CarND-Capstone/ros/src/tl_detector/misclassified"
     #path to an already trained tensor graph
     tensor_sourcepath=default_graph_path#'../tensor/linux_tensor0.999'
     if train:
-        
         #read tl-images and apply labels
         val = importCustomImages(img_sourcefolder)
         #adjust the number of element counts so that each
@@ -371,20 +369,27 @@ if __name__ == '__main__':
         #val = normalizeZeroMeanData(val)
         #Apply augmentation to the dataset
         val = dataAugmentation(val)
-        #start training
-        trainCNN(val)
+        if 0!=len(val):
+          #start training
+          trainCNN(val)
+        else:
+          print("No data for training")
         exit(0)
 
     if verify:
         val = importCustomImages(img_sourcefolder)
         val = np.concatenate(val)
-        loadCNNAndVerify(tensor_sourcepath, val)
+        if(0 != len(val)):
+          loadCNNAndVerify(tensor_sourcepath, val)
+        else:
+          print("No data for validation")
         exit(0)
         
     if test:
         color = [ 'RED', 'YELLOW', 'GREEN']
         test = TrafficLightClassifier(tensor_sourcepath)
-    
+        
+        #pathes used in windows
         sim_green_path   = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/green'
         sim_red_path     = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/red'
         sim_yellow_path  = 'C:/Users/micha/Desktop/Udacity/Last/training/sim_samples/yellow'
